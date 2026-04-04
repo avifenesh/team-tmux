@@ -14,6 +14,34 @@
 
 set -euo pipefail
 
+show_help() {
+  cat <<'EOF'
+team-send - Send a message to an agent's inbox
+
+Usage:
+  team-send <to> <from> <message> [REPO_ROOT]
+
+Arguments:
+  to          Target agent: manager, worker-1, worker-2, worker-3
+  from        Sender name: manager, worker-N, you, or any string
+  message     Message body (quote it)
+  REPO_ROOT   Project directory (default: $PWD)
+
+Examples:
+  team-send manager you "Implement the auth module"
+  team-send worker-1 manager "Handle the database layer"
+  team-send manager worker-1 "Done. All tests pass."
+  team-send worker-2 you "Review the PR" /path/to/project
+
+Related commands:
+  team-start   Start a team session
+  team-stop    Stop the team session
+EOF
+  exit 0
+}
+
+[[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && show_help
+
 TO="${1:?Usage: team-send <to> <from> <message> [REPO_ROOT]}"
 FROM="${2:?Usage: team-send <to> <from> <message> [REPO_ROOT]}"
 BODY="${3:?Usage: team-send <to> <from> <message> [REPO_ROOT]}"

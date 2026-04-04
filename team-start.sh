@@ -16,6 +16,39 @@
 
 set -euo pipefail
 
+show_help() {
+  cat <<'EOF'
+team-start - Start a 1-manager + 3-worker agent team in tmux
+
+Usage:
+  team-start                              Claude, default model, in $PWD
+  team-start /path/to/project             Claude in specific repo
+  team-start --model opus                 Claude with specific model for all agents
+  team-start --bedrock                    Claude via Bedrock (Opus manager, Sonnet workers)
+  team-start --codex                      Codex instead of Claude
+  team-start --codex --model o4-mini      Codex with specific model
+  team-start --resume                     Re-attach existing session
+  team-start --help                       Show this help
+
+Environment variables:
+  SESSION          Override tmux session name (default: <dirname>-team)
+  MANAGER_MODEL    Bedrock manager model ID
+  WORKER_MODEL     Bedrock worker model ID
+
+Project setup:
+  Create .coordination/prompts/ in your project with role briefs:
+    manager.md              Manager role brief
+    worker-template.md      Template with {{WORKER_ID}} and {{WORKER_NUM}} placeholders
+
+Related commands:
+  team-send    Send a message to an agent
+  team-stop    Stop the team session
+EOF
+  exit 0
+}
+
+[[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && show_help
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # Parse args
