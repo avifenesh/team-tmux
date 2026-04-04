@@ -124,26 +124,20 @@ fi
 case "$OS" in
   linux|wsl)
     if ! command -v inotifywait &>/dev/null; then
-      echo "Install inotify-tools for instant message delivery? (y/N)"
-      read -r answer
-      [[ "$answer" == [yY]* ]] && install_pkg inotify-tools
-      echo ""
+      install_pkg inotify-tools
     fi
     ;;
   macos)
     if ! command -v fswatch &>/dev/null; then
-      echo "Install fswatch for instant message delivery? (y/N)"
-      read -r answer
-      [[ "$answer" == [yY]* ]] && install_pkg fswatch
-      echo ""
+      install_pkg fswatch
     fi
     ;;
 esac
 
-# Find or create bin directory
+# Find a writable bin directory on PATH
 BIN_DIR=""
 for dir in "$HOME/bin" "$HOME/.local/bin" "/usr/local/bin"; do
-  if [[ -d "$dir" ]] && echo "$PATH" | tr ':' '\n' | grep -qx "$dir"; then
+  if [[ -d "$dir" ]] && [[ -w "$dir" ]] && echo "$PATH" | tr ':' '\n' | grep -qx "$dir"; then
     BIN_DIR="$dir"
     break
   fi
@@ -157,8 +151,13 @@ fi
 # Install commands
 chmod +x "$SCRIPT_DIR/team-start.sh" "$SCRIPT_DIR/team-send.sh" "$SCRIPT_DIR/team-watch.sh" "$SCRIPT_DIR/team-stop.sh"
 
+# Symlink on Linux/macOS, copy on Windows (symlinks need elevated privileges)
 for cmd in "${CMDS[@]}"; do
-  ln -sf "$SCRIPT_DIR/$cmd.sh" "$BIN_DIR/$cmd"
+  if [[ "$OS" == "windows" ]]; then
+    cp "$SCRIPT_DIR/$cmd.sh" "$BIN_DIR/$cmd"
+  else
+    ln -sf "$SCRIPT_DIR/$cmd.sh" "$BIN_DIR/$cmd"
+  fi
 done
 
 echo "[OK] Installed: ${CMDS[*]} -> $BIN_DIR"
