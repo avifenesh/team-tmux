@@ -50,7 +50,9 @@ EOF
 
 [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && show_help
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# Resolve through symlinks so SCRIPT_DIR points to the repo, not the symlink directory
+REAL_SCRIPT="$(readlink -f "$0" 2>/dev/null || python3 -c "import os,sys; print(os.path.realpath(sys.argv[1]))" "$0")"
+SCRIPT_DIR="$(cd "$(dirname "$REAL_SCRIPT")" && pwd)"
 
 # Parse args
 REPO_ROOT=""
