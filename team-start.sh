@@ -27,7 +27,8 @@ Usage:
   team-start --bedrock                    Claude via Bedrock (Opus manager, Sonnet workers)
   team-start --codex                      Codex instead of Claude
   team-start --codex --model o4-mini      Codex with specific model
-  team-start --resume                     Re-attach existing session
+  team-start --resume                     Re-attach if session exists, or restart agents
+                                         with their previous conversation context
   team-start --help                       Show this help
 
 Environment variables:
@@ -77,8 +78,14 @@ SESSION="${SESSION:-$(basename "$REPO_ROOT")-team}"
 INBOX_ROOT="$REPO_ROOT/.coordination/mailbox/inbox"
 
 if [[ "$RESUME" == "1" ]]; then
-  tmux attach -t "$SESSION" 2>/dev/null || { echo "[ERROR] No session: $SESSION"; exit 1; }
-  exit 0
+  # If tmux session is still alive, just re-attach
+  if tmux has-session -t "$SESSION" 2>/dev/null; then
+    tmux attach -t "$SESSION"
+    exit 0
+  fi
+  # Session is dead - restart agents with their previous conversation context
+  echo "[INFO] Session gone. Restarting agents with previous context..."
+  # Fall through to normal startup - build_cmd will add resume flags
 fi
 
 # Guards
@@ -147,27 +154,47 @@ tmux send-keys -t "$SESSION:watchers" -l "wait"
 tmux send-keys -t "$SESSION:watchers" Enter
 
 # Build agent command as an array - no string interpolation
+# $1 = bedrock model ID (only used with --bedrock)
+# $2 = agent name (manager, worker-1, etc.) - used for --name / --resume
 build_cmd() {
+  local bedrock_model="$1" agent_name="$2"
   local -a cmd=()
+
   if [[ "$USE_CODEX" == "1" ]]; then
     cmd=(codex --dangerously-bypass-approvals-and-sandbox)
     [[ -n "$MODEL" ]] && cmd+=(--model "$MODEL")
+    # Codex doesn't support named sessions - resume not available
   elif [[ "$USE_BEDROCK" == "1" ]]; then
-    cmd=(claude --dangerously-skip-permissions --model "$1")
+    cmd=(claude --dangerously-skip-permissions --model "$bedrock_model")
+    if [[ "$RESUME" == "1" ]]; then
+      cmd+=(--resume "$agent_name")
+    else
+      cmd+=(--name "$agent_name")
+    fi
   else
     cmd=(claude --dangerously-skip-permissions)
     [[ -n "$MODEL" ]] && cmd+=(--model "$MODEL")
+    if [[ "$RESUME" == "1" ]]; then
+      cmd+=(--resume "$agent_name")
+    else
+      cmd+=(--name "$agent_name")
+    fi
   fi
   printf '%q ' "${cmd[@]}"
 }
 
-MGR_CMD="$(build_cmd "$MANAGER_MODEL")"
-WRK_CMD="$(build_cmd "$WORKER_MODEL")"
+MGR_CMD="$(build_cmd "$MANAGER_MODEL" manager)"
+WRK_CMDS=("")
+for i in 1 2 3; do
+  WRK_CMDS+=("$(build_cmd "$WORKER_MODEL" "worker-$i")")
+done
 
 # Prepend CLAUDE_CODE_USE_BEDROCK env var for bedrock mode
 if [[ "$USE_BEDROCK" == "1" ]]; then
   MGR_CMD="CLAUDE_CODE_USE_BEDROCK=1 $MGR_CMD"
-  WRK_CMD="CLAUDE_CODE_USE_BEDROCK=1 $WRK_CMD"
+  for i in 1 2 3; do
+    WRK_CMDS[$i]="CLAUDE_CODE_USE_BEDROCK=1 ${WRK_CMDS[$i]}"
+  done
 fi
 
 # Launch agents via per-pane launcher scripts - avoids shell escaping in send-keys
@@ -176,7 +203,7 @@ launch_agent() {
   local launcher="$REPO_ROOT/.coordination/pids/launch-$(basename "$pane").sh"
   cat > "$launcher" <<LAUNCHEOF
 #!/usr/bin/env bash
-cd $(printf '%q' "$REPO_ROOT") && exec $cmd
+cd $(printf '%q' "$REPO_ROOT") && $cmd
 LAUNCHEOF
   chmod +x "$launcher"
   tmux send-keys -t "$pane" -l "\"$launcher\""
@@ -190,7 +217,7 @@ for i in 1 2 3; do
     sed "s/{{WORKER_ID}}/worker-$i/g; s/{{WORKER_NUM}}/$i/g" \
       "$TEMPLATE" > "$REPO_ROOT/.coordination/prompts/worker-$i.md"
   fi
-  launch_agent "${PANES[$i]}" "$WRK_CMD"
+  launch_agent "${PANES[$i]}" "${WRK_CMDS[$i]}"
 done
 
 tmux select-window -t "$SESSION:team"
