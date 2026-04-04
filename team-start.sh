@@ -133,36 +133,64 @@ tmux select-pane -t "${PANES[3]}" -T "WORKER 3"
 tmux new-window -t "$SESSION" -n watchers
 AGENTS=(manager worker-1 worker-2 worker-3)
 for i in 0 1 2 3; do
-  tmux send-keys -t "$SESSION:watchers" \
-    "\"$SCRIPT_DIR/team-watch.sh\" \"${AGENTS[$i]}\" \"${PANES[$i]}\" \"$REPO_ROOT\" &" Enter
+  # Write launcher script instead of interpolating paths into send-keys
+  LAUNCHER="$REPO_ROOT/.coordination/pids/watch-${AGENTS[$i]}.sh"
+  cat > "$LAUNCHER" <<WATCHEOF
+#!/usr/bin/env bash
+exec "$SCRIPT_DIR/team-watch.sh" "${AGENTS[$i]}" "${PANES[$i]}" "$REPO_ROOT"
+WATCHEOF
+  chmod +x "$LAUNCHER"
+  tmux send-keys -t "$SESSION:watchers" -l "\"$LAUNCHER\" &"
+  tmux send-keys -t "$SESSION:watchers" Enter
 done
-tmux send-keys -t "$SESSION:watchers" "wait" Enter
+tmux send-keys -t "$SESSION:watchers" -l "wait"
+tmux send-keys -t "$SESSION:watchers" Enter
 
-# Build agent command
-if [[ "$USE_CODEX" == "1" ]]; then
-  BASE="codex --dangerously-bypass-approvals-and-sandbox"
-  [[ -n "$MODEL" ]] && BASE="$BASE --model \"$MODEL\""
-  MGR_CMD="$BASE"
-  WRK_CMD="$BASE"
-elif [[ "$USE_BEDROCK" == "1" ]]; then
-  MGR_CMD="CLAUDE_CODE_USE_BEDROCK=1 claude --dangerously-skip-permissions --model \"$MANAGER_MODEL\""
-  WRK_CMD="CLAUDE_CODE_USE_BEDROCK=1 claude --dangerously-skip-permissions --model \"$WORKER_MODEL\""
-else
-  BASE="claude --dangerously-skip-permissions"
-  [[ -n "$MODEL" ]] && BASE="$BASE --model \"$MODEL\""
-  MGR_CMD="$BASE"
-  WRK_CMD="$BASE"
+# Build agent command as an array - no string interpolation
+build_cmd() {
+  local -a cmd=()
+  if [[ "$USE_CODEX" == "1" ]]; then
+    cmd=(codex --dangerously-bypass-approvals-and-sandbox)
+    [[ -n "$MODEL" ]] && cmd+=(--model "$MODEL")
+  elif [[ "$USE_BEDROCK" == "1" ]]; then
+    cmd=(claude --dangerously-skip-permissions --model "$1")
+  else
+    cmd=(claude --dangerously-skip-permissions)
+    [[ -n "$MODEL" ]] && cmd+=(--model "$MODEL")
+  fi
+  printf '%q ' "${cmd[@]}"
+}
+
+MGR_CMD="$(build_cmd "$MANAGER_MODEL")"
+WRK_CMD="$(build_cmd "$WORKER_MODEL")"
+
+# Prepend CLAUDE_CODE_USE_BEDROCK env var for bedrock mode
+if [[ "$USE_BEDROCK" == "1" ]]; then
+  MGR_CMD="CLAUDE_CODE_USE_BEDROCK=1 $MGR_CMD"
+  WRK_CMD="CLAUDE_CODE_USE_BEDROCK=1 $WRK_CMD"
 fi
 
-# Launch agents
-tmux send-keys -t "${PANES[0]}" "cd \"$REPO_ROOT\" && $MGR_CMD" Enter
+# Launch agents via per-pane launcher scripts - avoids shell escaping in send-keys
+launch_agent() {
+  local pane="$1" cmd="$2"
+  local launcher="$REPO_ROOT/.coordination/pids/launch-$(basename "$pane").sh"
+  cat > "$launcher" <<LAUNCHEOF
+#!/usr/bin/env bash
+cd $(printf '%q' "$REPO_ROOT") && exec $cmd
+LAUNCHEOF
+  chmod +x "$launcher"
+  tmux send-keys -t "$pane" -l "\"$launcher\""
+  tmux send-keys -t "$pane" Enter
+}
+
+launch_agent "${PANES[0]}" "$MGR_CMD"
 for i in 1 2 3; do
   TEMPLATE="$REPO_ROOT/.coordination/prompts/worker-template.md"
   if [[ -f "$TEMPLATE" ]]; then
     sed "s/{{WORKER_ID}}/worker-$i/g; s/{{WORKER_NUM}}/$i/g" \
       "$TEMPLATE" > "$REPO_ROOT/.coordination/prompts/worker-$i.md"
   fi
-  tmux send-keys -t "${PANES[$i]}" "cd \"$REPO_ROOT\" && $WRK_CMD" Enter
+  launch_agent "${PANES[$i]}" "$WRK_CMD"
 done
 
 tmux select-window -t "$SESSION:team"
