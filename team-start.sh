@@ -93,13 +93,19 @@ fi
 MANAGER_MODEL="${MANAGER_MODEL:-us.anthropic.claude-opus-4-6-20250514-v1:0}"
 WORKER_MODEL="${WORKER_MODEL:-us.anthropic.claude-sonnet-4-6-20250514-v1:0}"
 
-# Reset
+# Reset - kill old watchers and session
+for pidfile in "$REPO_ROOT/.coordination/pids/"*.pid; do
+  [[ -f "$pidfile" ]] || continue
+  pid="$(cat "$pidfile" 2>/dev/null)" || continue
+  kill "$pid" 2>/dev/null || true
+  rm -f "$pidfile"
+done
 tmux kill-session -t "$SESSION" 2>/dev/null || true
 for agent in manager worker-1 worker-2 worker-3; do
   mkdir -p "$INBOX_ROOT/$agent"
 done
 rm -f "$REPO_ROOT/.coordination/initialized/"*
-mkdir -p "$REPO_ROOT/.coordination/prompts" "$REPO_ROOT/.coordination/initialized"
+mkdir -p "$REPO_ROOT/.coordination/prompts" "$REPO_ROOT/.coordination/initialized" "$REPO_ROOT/.coordination/pids"
 
 # Layout:
 #   +------------------+------------------+

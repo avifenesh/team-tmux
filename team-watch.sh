@@ -9,6 +9,9 @@
 
 set -euo pipefail
 
+# Exit cleanly when session is killed - background processes don't get SIGHUP by default
+trap 'exit 0' HUP TERM INT
+
 AGENT="${1:?Usage: team-watch <agent> <tmux-pane-id> [REPO_ROOT]}"
 PANE="${2:?Usage: team-watch <agent> <tmux-pane-id> [REPO_ROOT]}"
 REPO_ROOT="${3:-$PWD}"
@@ -17,7 +20,9 @@ REPO_ROOT="$(cd "$REPO_ROOT" && pwd)"
 INBOX="$REPO_ROOT/.coordination/mailbox/inbox/$AGENT"
 INIT_FLAG="$REPO_ROOT/.coordination/initialized/$AGENT"
 PROMPTS="$REPO_ROOT/.coordination/prompts"
-mkdir -p "$INBOX" "$(dirname "$INIT_FLAG")"
+PIDFILE="$REPO_ROOT/.coordination/pids/$AGENT.pid"
+mkdir -p "$INBOX" "$(dirname "$INIT_FLAG")" "$(dirname "$PIDFILE")"
+echo $$ > "$PIDFILE"
 
 type_text() {
   local pane="$1"

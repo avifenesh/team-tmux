@@ -22,6 +22,7 @@ Usage:
   team-stop --help             Show this help
 
 What it kills:
+  - Watcher processes (via PID files, then SIGTERM)
   - The tmux session (all 4 agent panes + watcher window)
   - With --clean: also removes .coordination/ directory
 
@@ -33,6 +34,22 @@ EOF
 }
 
 [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && show_help
+
+# Kill watcher processes for a repo via PID files
+kill_watchers() {
+  local repo="$1"
+  local piddir="$repo/.coordination/pids"
+  [[ -d "$piddir" ]] || return 0
+  for pidfile in "$piddir"/*.pid; do
+    [[ -f "$pidfile" ]] || continue
+    local pid
+    pid="$(cat "$pidfile" 2>/dev/null)" || continue
+    if kill -0 "$pid" 2>/dev/null; then
+      kill "$pid" 2>/dev/null || true
+    fi
+    rm -f "$pidfile"
+  done
+}
 
 if [[ "${1:-}" == "--all" ]]; then
   KILLED=0
@@ -58,6 +75,9 @@ done
 REPO_ROOT="${REPO_ROOT:-$PWD}"
 REPO_ROOT="$(cd "$REPO_ROOT" && pwd)"
 SESSION="${SESSION:-$(basename "$REPO_ROOT")-team}"
+
+# Kill watchers first - they run as background processes and may survive session kill
+kill_watchers "$REPO_ROOT"
 
 if tmux has-session -t "$SESSION" 2>/dev/null; then
   tmux kill-session -t "$SESSION"
