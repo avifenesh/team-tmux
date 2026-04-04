@@ -3,7 +3,7 @@
 
 set -euo pipefail
 
-CMDS=(team-start team-send team-watch)
+CMDS=(team-start team-send team-watch team-stop)
 REMOVED=0
 
 for cmd in "${CMDS[@]}"; do

@@ -8,7 +8,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-CMDS=(team-start team-send team-watch)
+CMDS=(team-start team-send team-watch team-stop)
 CHECK_ONLY=0
 [[ "${1:-}" == "--check" ]] && CHECK_ONLY=1
 
@@ -155,7 +155,7 @@ if [[ -z "$BIN_DIR" ]]; then
 fi
 
 # Install commands
-chmod +x "$SCRIPT_DIR/team-start.sh" "$SCRIPT_DIR/team-send.sh" "$SCRIPT_DIR/team-watch.sh"
+chmod +x "$SCRIPT_DIR/team-start.sh" "$SCRIPT_DIR/team-send.sh" "$SCRIPT_DIR/team-watch.sh" "$SCRIPT_DIR/team-stop.sh"
 
 for cmd in "${CMDS[@]}"; do
   ln -sf "$SCRIPT_DIR/$cmd.sh" "$BIN_DIR/$cmd"
