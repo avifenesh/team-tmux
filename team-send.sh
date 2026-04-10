@@ -1,77 +1,48 @@
 #!/usr/bin/env bash
-# team-send <to> <from> <message> [REPO_ROOT]
+# scripts/team-send.sh  <to>  <from>  <message>
 #
 # Atomically drops a JSON message into an agent's inbox.
-# team-watch picks it up and wakes the agent.
-#
-# REPO_ROOT defaults to $PWD. Run from your project directory,
-# or pass the repo path as the 4th argument.
+# The inbox watcher picks it up and wakes the agent automatically.
 #
 # Examples:
-#   team-send worker-1 manager "Implement the executor module"
-#   team-send manager worker-1 "Done. cargo test passes."
-#   team-send worker-2 you "Review the PR" /path/to/project
+#   ./scripts/team-send.sh worker-1 manager "Implement the executor module in crates/cairn-agent/src/executor.rs"
+#   ./scripts/team-send.sh manager worker-1 "Done. executor.rs written and cargo test passes."
 
 set -euo pipefail
 
-show_help() {
-  cat <<'EOF'
-team-send - Send a message to an agent's inbox
+TO="${1:?Usage: team-send.sh <to> <from> <message>}"
+FROM="${2:?Usage: team-send.sh <to> <from> <message>}"
+BODY="${3:?Usage: team-send.sh <to> <from> <message>}"
 
-Usage:
-  team-send <to> <from> <message> [REPO_ROOT]
-
-Arguments:
-  to          Target agent: manager, worker-1, worker-2, worker-3
-  from        Sender name: manager, worker-N, you, or any string
-  message     Message body (quote it)
-  REPO_ROOT   Project directory (default: $PWD)
-
-Examples:
-  team-send manager you "Implement the auth module"
-  team-send worker-1 manager "Handle the database layer"
-  team-send manager worker-1 "Done. All tests pass."
-  team-send worker-2 you "Review the PR" /path/to/project
-
-Related commands:
-  team-start   Start a team session
-  team-stop    Stop the team session
-EOF
-  exit 0
-}
-
-[[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && show_help
-
-TO="${1:?Usage: team-send <to> <from> <message> [REPO_ROOT]}"
-FROM="${2:?Usage: team-send <to> <from> <message> [REPO_ROOT]}"
-BODY="${3:?Usage: team-send <to> <from> <message> [REPO_ROOT]}"
-REPO_ROOT="${4:-$PWD}"
-REPO_ROOT="$(cd "$REPO_ROOT" && pwd)"
-
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 INBOX="$REPO_ROOT/.coordination/mailbox/inbox/$TO"
 mkdir -p "$INBOX"
 
-# python3 handles timestamp, unique ID, JSON encoding, and atomic write
-# Avoids date -Iseconds (GNU-only, fails on macOS) and date +%s%N (no nanoseconds on macOS/Windows)
-python3 -c "
-import json, sys, time, os
-from datetime import datetime, timezone
+TIMESTAMP="$(date -Iseconds)"
+NANO="$(date +%s%N)"
+TMP="$INBOX/.tmp-$NANO.json"
+FINAL="$INBOX/msg-$NANO.json"
 
-inbox = sys.argv[1]
-msg = json.dumps({
-    'from': sys.argv[2],
-    'to': sys.argv[3],
-    'ts': datetime.now(timezone.utc).astimezone().isoformat(),
-    'body': sys.argv[4]
-})
+# Build JSON via python3's json.dumps — handles ALL escapes required by RFC 8259
+# (quotes, backslashes, line-feeds, carriage-returns, tabs, other control chars,
+# and unicode). The earlier printf+manual-escape approach only handled \ and ",
+# so multi-line bodies produced invalid JSON that the watcher silently dropped.
+python3 -c '
+import json, sys
+msg = {
+    "from": sys.argv[1],
+    "to":   sys.argv[2],
+    "ts":   sys.argv[3],
+    "body": sys.argv[4],
+}
+with open(sys.argv[5], "w", encoding="utf-8") as f:
+    json.dump(msg, f, ensure_ascii=False)
+' "$FROM" "$TO" "$TIMESTAMP" "$BODY" "$TMP"
 
-uid = f'{time.time_ns()}_{os.urandom(4).hex()}'
-tmp = os.path.join(inbox, f'.tmp-{uid}.json')
-final = os.path.join(inbox, f'msg-{uid}.json')
+# Atomic rename — prevents watcher from reading a partial file
+mv "$TMP" "$FINAL"
 
-with open(tmp, 'w') as f:
-    f.write(msg)
-os.rename(tmp, final)
-" "$INBOX" "$FROM" "$TO" "$BODY"
-
-echo "[team-send] $FROM -> $TO: $BODY"
+# Log confirmation with a one-line preview of the body so long messages
+# don't flood the sender's terminal.
+PREVIEW="${BODY%%$'\n'*}"
+echo "[team-send] $FROM → $TO: $PREVIEW"
