@@ -7,12 +7,12 @@ File-based message queue with atomic delivery. Agents coordinate through inbox f
 ## Install
 
 ```bash
-git clone https://github.com/agent-sh/team-tmux.git
+git clone https://github.com/avifenesh/team-tmux.git
 cd team-tmux
 ./install.sh
 ```
 
-Creates `team-start`, `team-send`, `team-watch` symlinks on your PATH.
+Creates `team-start`, `team-send`, `team-watch`, `team-stop` symlinks on your PATH (copies on Windows). It installs missing `tmux`, `python3` and the file watcher with the system package manager. `./install.sh --check` reports what is installed without changing anything.
 
 ### Requirements
 
@@ -20,7 +20,7 @@ Creates `team-start`, `team-send`, `team-watch` symlinks on your PATH.
 - python3
 - claude (Claude Code) or codex (Codex CLI)
 - Linux: `inotify-tools` for instant message delivery (falls back to 1s poll)
-- macOS: `fswatch` for instant message delivery (falls back to 1s poll)
+- macOS: 1s poll (`install.sh` installs `fswatch`, but `team-watch` does not use it yet)
 - Windows: poll mode only (via Git Bash or WSL)
 
 ## Usage
@@ -43,8 +43,17 @@ team-start --bedrock
 # Start in a specific directory
 team-start /path/to/project
 
-# Re-attach to existing session
+# Re-attach to the session, or restart Claude agents with their previous conversation if it is gone
 team-start --resume
+```
+
+### Stopping
+
+```bash
+team-stop                    # stop the team for $PWD
+team-stop /path/to/project   # stop the team for a specific repo
+team-stop --clean            # stop and remove .coordination/
+team-stop --all              # stop all *-team sessions
 ```
 
 ### Sending messages
@@ -69,7 +78,7 @@ A second tmux window (`watchers`) runs the inbox watchers in the background.
 
 ## How it works
 
-1. `team-start` creates a tmux session with 4 panes, launches an AI agent in each
+1. `team-start` creates a tmux session with 4 panes, launches an AI agent in each. Agents run with approvals off (`claude --dangerously-skip-permissions`, `codex --dangerously-bypass-approvals-and-sandbox`)
 2. Each agent has an inbox at `.coordination/mailbox/inbox/<agent>/`
 3. `team-send` writes a JSON message to the target agent's inbox (atomic rename)
 4. `team-watch` detects the new file and injects the message text into the agent's tmux pane
